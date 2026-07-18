@@ -137,7 +137,9 @@ httpsServer.listen(PORT, () => {
   console.log(`   Certificado (desde el iPhone): http://${ips[0] || 'TU-IP'}:${HTTP_PORT}/cert\n`);
   console.log('2) En el iPhone (Safari), abre:');
   ips.forEach((ip) => console.log(`   https://${ip}:${PORT}/phone.html`));
-  console.log('\n3) En tu PC (Chrome/Edge/OBS), abre:');
+  console.log('\n3) En tu PC (Chrome/Edge), abre el panel de control:');
+  console.log(`   http://localhost:${HTTP_PORT}/control.html`);
+  console.log('\n4) En tu PC (OBS), abre el viewer:');
   ips.forEach((ip) => console.log(`   http://${ip}:${HTTP_PORT}/viewer.html`));
   console.log(`   (o simplemente: http://localhost:${HTTP_PORT}/viewer.html)\n`);
 });
