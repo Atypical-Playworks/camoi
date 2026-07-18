@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>📱 Cámara — iPhone Webcam Bridge</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d1115; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: cover; }
+  canvas { display: none; }
+  #ui {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    font-family: -apple-system, sans-serif; color: #fff; text-align: center; padding: 24px;
+  }
+  #ui h2 { font-size: 18px; }
+  #ui p { font-size: 14px; opacity: .7; }
+  #status {
+    position: fixed; top: 12px; left: 0; right: 0; text-align: center;
+    font-family: -apple-system, sans-serif; font-size: 13px;
+    color: #fff; background: rgba(0,0,0,.5); padding: 6px 12px;
+    border-radius: 8px; margin: 0 auto; width: fit-content;
+    pointer-events: none; z-index: 10;
+  }
+  button {
+    font-size: 16px; padding: 14px 28px; border-radius: 14px; border: none;
+    background: #2f81f7; color: #fff; font-weight: 600; cursor: pointer;
+  }
+  button:active { transform: scale(.96); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dot.on { background: #3fb950; }
+  .dot.off { background: #f85149; }
+</style>
+</head>
+<body>
+  <video id="localVideo" autoplay playsinline muted></video>
+  <canvas id="portraitCanvas"></canvas>
+
+  <div id="ui">
+    <h2>📱 iPhone Webcam Bridge</h2>
+    <p id="hint">Toca para iniciar la cámara</p>
+    <button id="startBtn">Iniciar cámara</button>
+  </div>
+
+  <div id="status"><span class="dot off" id="dot"></span><span id="statusText">Desconectado</span></div>
+
+<script>
+  const localVideo = document.getElementById('localVideo');
+  const portraitCanvas = document.getElementById('portraitCanvas');
+  const uiEl = document.getElementById('ui');
+  const statusText = document.getElementById('statusText');
+  const dot = document.getElementById('dot');
+  const startBtn = document.getElementById('startBtn');
+  const hintEl = document.getElementById('hint');
+
+  let pc = null;
+  let ws = null;
+  let localStream = null;
+  let processedStream = null;
+  let currentDeviceId = '';
+  let currentRotation = 0;
+  let isMirrored = false;
+  let animFrameId = null;
+  let allCameras = [];
+  let portraitEnabled = false;
+  let selfieSegmentation = null;
+  let canvasCtx = null;
+
+  const DEFAULT_QUALITY = '1920x1080@30';
+
+  function setStatus(text, connected) {
+    statusText.textContent = text;
+    dot.className = `dot ${connected ? 'on' : 'off'}`;
+  }
+
+  function parseQuality(q) {
+    const [size, fps] = q.split('@');
+    const [w, h] = size.split('x').map(Number);
+    return { width: w, height: h, frameRate: Number(fps) };
+  }
+
+  function updatePreviewTransform() {
+    localVideo.style.transform = isMirrored ? 'scaleX(-1)' : '';
+  }
+
+  async function enumerateCameras() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      allCameras = devices.filter((d) => d.kind === 'videoinput');
+      sendCameraList();
+    } catch (e) {
+      console.warn('enumerateDevices failed:', e);
+    }
+  }
+
+  function sendCameraList() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'cameras',
+      cameras: allCameras.map((c) => ({ deviceId: c.deviceId, label: c.label })),
+    }));
+  }
+
+  async function getStream(deviceId, quality) {
+    if (localStream) localStream.getTracks().forEach((t) => t.stop());
+    const q = parseQuality(quality || DEFAULT_QUALITY);
+    const videoConstraints = {
+      width: { ideal: q.width },
+      height: { ideal: q.height },
+      frameRate: { ideal: q.frameRate },
+    };
+    if (deviceId) videoConstraints.deviceId = { exact: deviceId };
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: videoConstraints,
+      audio: true,
+    });
+    localVideo.srcObject = localStream;
+    updatePreviewTransform();
+    await enumerateCameras();
+    return localStream;
+  }
+
+  async function loadPortraitModel() {
+    if (selfieSegmentation) return;
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js';
+    document.head.appendChild(script);
+    await new Promise((resolve, reject) => {
+      script.onload = resolve;
+      script.onerror = reject;
+    });
+    selfieSegmentation = new window.SelfieSegmentation({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`,
+    });
+    selfieSegmentation.setOptions({ modelSelection: 1 });
+    await selfieSegmentation.initialize();
+    canvasCtx = portraitCanvas.getContext('2d');
+  }
+
+  async function getProcessedStream() {
+    const needsRotation = currentRotation !== 0;
+    const needsMirror = isMirrored;
+    const needsPortrait = portraitEnabled && selfieSegmentation;
+
+    if (!needsRotation && !needsMirror && !needsPortrait) {
+      processedStream = null;
+      return localStream;
+    }
+
+    const videoTrack = localStream.getVideoTracks()[0];
+    const settings = videoTrack.getSettings();
+    const srcW = settings.width || 1920;
+    const srcH = settings.height || 1080;
+
+    const isSideways = currentRotation === 90 || currentRotation === 270;
+    const canvasW = isSideways ? srcH : srcW;
+    const canvasH = isSideways ? srcW : srcH;
+
+    portraitCanvas.width = canvasW;
+    portraitCanvas.height = canvasH;
+
+    if (!canvasCtx) canvasCtx = portraitCanvas.getContext('2d');
+
+    if (animFrameId) cancelAnimationFrame(animFrameId);
+
+    const fps = parseQuality(DEFAULT_QUALITY).frameRate;
+
+    if (needsPortrait && selfieSegmentation) {
+      async function drawPortraitFrame() {
+        const result = await selfieSegmentation.segmentForVideo(localVideo, performance.now());
+        canvasCtx.clearRect(0, 0, canvasW, canvasH);
+
+        if (result && result.segmentationMask) {
+          canvasCtx.save();
+          canvasCtx.translate(canvasW / 2, canvasH / 2);
+          canvasCtx.rotate((currentRotation * Math.PI) / 180);
+          if (isMirrored) canvasCtx.scale(-1, 1);
+
+          canvasCtx.drawImage(result.segmentationMask, -srcW / 2, -srcH / 2, srcW, srcH);
+          canvasCtx.globalCompositeOperation = 'source-in';
+          canvasCtx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
+          canvasCtx.globalCompositeOperation = 'destination-over';
+
+          canvasCtx.filter = 'blur(20px)';
+          canvasCtx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
+          canvasCtx.filter = 'none';
+          canvasCtx.restore();
+        }
+
+        animFrameId = requestAnimationFrame(drawPortraitFrame);
+      }
+      drawPortraitFrame();
+    } else {
+      function drawFrame() {
+        canvasCtx.clearRect(0, 0, canvasW, canvasH);
+        canvasCtx.save();
+        canvasCtx.translate(canvasW / 2, canvasH / 2);
+        canvasCtx.rotate((currentRotation * Math.PI) / 180);
+        if (isMirrored) canvasCtx.scale(-1, 1);
+        canvasCtx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
+        canvasCtx.restore();
+        animFrameId = requestAnimationFrame(drawFrame);
+      }
+      drawFrame();
+    }
+
+    const canvasStream = portraitCanvas.captureStream(fps);
+    const audioTracks = localStream.getAudioTracks();
+    if (audioTracks.length > 0) canvasStream.addTrack(audioTracks[0]);
+    processedStream = canvasStream;
+    return canvasStream;
+  }
+
+  function connectSignaling() {
+    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${wsProto}://${location.host}?role=phone`);
+
+    ws.onopen = () => {
+      setStatus('Conectado al servidor', true);
+      sendCameraList();
+    };
+    ws.onclose = () => setStatus('Desconectado', false);
+    ws.onerror = () => setStatus('Error de conexión', false);
+
+    ws.onmessage = async (event) => {
+      const msg = JSON.parse(event.data);
+
+      if (msg.type === 'answer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.payload));
+        setStatus('Transmitiendo a la PC', true);
+        uiEl.style.display = 'none';
+      } else if (msg.type === 'candidate') {
+        try { await pc.addIceCandidate(msg.payload); } catch (e) { console.warn(e); }
+      } else if (msg.type === 'viewer-ready') {
+        if (localStream) await startCall();
+      } else if (msg.type === 'control') {
+        await handleControl(msg);
+      } else if (msg.type === 'request-cameras') {
+        sendCameraList();
+      }
+    };
+  }
+
+  async function handleControl(msg) {
+    switch (msg.action) {
+      case 'switch-camera':
+        currentDeviceId = msg.deviceId;
+        await getStream(currentDeviceId, DEFAULT_QUALITY);
+        if (pc) await startCall();
+        break;
+      case 'change-quality':
+        await getStream(currentDeviceId, msg.quality);
+        if (pc) await startCall();
+        break;
+      case 'rotate':
+        currentRotation = msg.rotation;
+        if (pc) await startCall();
+        break;
+      case 'mirror':
+        isMirrored = msg.enabled;
+        updatePreviewTransform();
+        if (pc) await startCall();
+        break;
+      case 'portrait':
+        portraitEnabled = msg.enabled;
+        if (portraitEnabled) {
+          try { await loadPortraitModel(); } catch (e) { console.warn('MediaPipe load failed:', e); break; }
+        }
+        if (pc) await startCall();
+        break;
+    }
+  }
+
+  async function startCall() {
+    if (pc) pc.close();
+    pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    });
+
+    const stream = await getProcessedStream();
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        ws.send(JSON.stringify({ type: 'candidate', payload: event.candidate }));
+      }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    ws.send(JSON.stringify({ type: 'offer', payload: offer }));
+    setStatus('Llamando a la PC…', true);
+  }
+
+  startBtn.addEventListener('click', async () => {
+    try {
+      await getStream(currentDeviceId, DEFAULT_QUALITY);
+      connectSignaling();
+      hintEl.textContent = 'Esperando conexión de la PC…';
+      startBtn.style.display = 'none';
+      setStatus('Conectando…', true);
+      const trySend = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          clearInterval(trySend);
+          startCall();
+        }
+      }, 200);
+    } catch (err) {
+      console.error('Camera error:', err);
+      hintEl.textContent = '❌ No se pudo acceder a la cámara: ' + err.message;
+    }
+  });
+</script>
+</body>
+</html>

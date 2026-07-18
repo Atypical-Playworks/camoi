@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>🎛️ Control — iPhone Webcam Bridge</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0d1117; color: #e6edf3; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .panel {
+    background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+    padding: 28px 32px; width: 380px; max-width: 95vw;
+  }
+  h1 { font-size: 20px; margin-bottom: 20px; text-align: center; }
+  .row { margin-bottom: 16px; }
+  .row label { display: block; font-size: 13px; opacity: .7; margin-bottom: 6px; }
+  .row select, .row button {
+    width: 100%; font-size: 15px; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid #30363d; background: #0d1117; color: #e6edf3;
+  }
+  .row button { cursor: pointer; font-weight: 600; }
+  .row button.on { background: #238636; border-color: #2ea043; }
+  .row button.off { background: #21262d; }
+  .row button:active { transform: scale(.98); }
+  .status {
+    margin-top: 20px; padding-top: 16px; border-top: 1px solid #30363d;
+    font-size: 13px; text-align: center;
+  }
+  .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .status .dot.on { background: #3fb950; }
+  .status .dot.off { background: #f85149; }
+  .status .line { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <h1>🎛️ Control remoto</h1>
+
+    <div class="row">
+      <label>📷 Cámara</label>
+      <select id="cameraSelect"><option value="">Esperando phone…</option></select>
+    </div>
+
+    <div class="row">
+      <label>🎬 Calidad</label>
+      <select id="qualitySelect">
+        <option value="1280x720@30">720p 30fps</option>
+        <option value="1280x720@60">720p 60fps</option>
+        <option value="1920x1080@30" selected>1080p 30fps</option>
+        <option value="1920x1080@60">1080p 60fps</option>
+        <option value="3840x2160@30">4K 30fps</option>
+        <option value="3840x2160@60">4K 60fps</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label>🔄 Rotación</label>
+      <select id="rotateSelect">
+        <option value="0">0°</option>
+        <option value="90">90°</option>
+        <option value="180">180°</option>
+        <option value="270">270°</option>
+      </select>
+    </div>
+
+    <div class="row" style="display:flex;gap:10px">
+      <div style="flex:1">
+        <label>🪞 Espejo</label>
+        <button id="mirrorBtn" class="off">OFF</button>
+      </div>
+      <div style="flex:1">
+        <label>🎭 Retrato</label>
+        <button id="portraitBtn" class="off">OFF</button>
+      </div>
+    </div>
+
+    <div class="status">
+      <div class="line"><span class="dot off" id="dotPhone"></span>Phone: <span id="stPhone">desconectado</span></div>
+      <div class="line"><span class="dot off" id="dotViewer"></span>Viewer: <span id="stViewer">desconectado</span></div>
+    </div>
+  </div>
+
+<script>
+  const cameraSelect = document.getElementById('cameraSelect');
+  const qualitySelect = document.getElementById('qualitySelect');
+  const rotateSelect = document.getElementById('rotateSelect');
+  const mirrorBtn = document.getElementById('mirrorBtn');
+  const portraitBtn = document.getElementById('portraitBtn');
+  const dotPhone = document.getElementById('dotPhone');
+  const dotViewer = document.getElementById('dotViewer');
+  const stPhone = document.getElementById('stPhone');
+  const stViewer = document.getElementById('stViewer');
+
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${wsProto}://${location.host}?role=control`);
+
+  let phoneConnected = false;
+  let viewerConnected = false;
+  let mirrorOn = false;
+  let portraitOn = false;
+
+  function send(msg) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
+  function updateStatus() {
+    dotPhone.className = `dot ${phoneConnected ? 'on' : 'off'}`;
+    dotViewer.className = `dot ${viewerConnected ? 'on' : 'off'}`;
+    stPhone.textContent = phoneConnected ? 'conectado' : 'desconectado';
+    stViewer.textContent = viewerConnected ? 'conectado' : 'desconectado';
+  }
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'status') {
+      phoneConnected = msg.phone;
+      viewerConnected = msg.viewer;
+      updateStatus();
+    } else if (msg.type === 'cameras') {
+      cameraSelect.innerHTML = '';
+      msg.cameras.forEach((cam) => {
+        const opt = document.createElement('option');
+        opt.value = cam.deviceId;
+        opt.textContent = cam.label;
+        cameraSelect.appendChild(opt);
+      });
+    }
+  };
+
+  ws.onopen = () => updateStatus();
+  ws.onclose = () => { phoneConnected = false; viewerConnected = false; updateStatus(); };
+
+  cameraSelect.addEventListener('change', () => {
+    send({ type: 'control', action: 'switch-camera', deviceId: cameraSelect.value });
+  });
+
+  qualitySelect.addEventListener('change', () => {
+    send({ type: 'control', action: 'change-quality', quality: qualitySelect.value });
+  });
+
+  rotateSelect.addEventListener('change', () => {
+    send({ type: 'control', action: 'rotate', rotation: parseInt(rotateSelect.value, 10) });
+  });
+
+  mirrorBtn.addEventListener('click', () => {
+    mirrorOn = !mirrorOn;
+    mirrorBtn.textContent = mirrorOn ? 'ON' : 'OFF';
+    mirrorBtn.className = mirrorOn ? 'on' : 'off';
+    send({ type: 'control', action: 'mirror', enabled: mirrorOn });
+  });
+
+  portraitBtn.addEventListener('click', () => {
+    portraitOn = !portraitOn;
+    portraitBtn.textContent = portraitOn ? 'ON' : 'OFF';
+    portraitBtn.className = portraitOn ? 'on' : 'off';
+    send({ type: 'control', action: 'portrait', enabled: portraitOn });
+  });
+</script>
+</body>
+</html>
