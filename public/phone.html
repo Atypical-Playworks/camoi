@@ -127,11 +127,15 @@
       audio: true,
     });
     localVideo.srcObject = localStream;
+    if (localVideo.readyState < HTMLMediaElement.HAVE_METADATA) {
+      await new Promise((resolve) => {
+        localVideo.addEventListener('loadedmetadata', resolve, { once: true });
+      });
+    }
+    await localVideo.play();
     updatePreviewTransform();
-    const track = localStream.getVideoTracks()[0];
-    const s = track.getSettings();
-    videoWidth = s.width || 1920;
-    videoHeight = s.height || 1080;
+    videoWidth = localVideo.videoWidth || 1920;
+    videoHeight = localVideo.videoHeight || 1080;
     await enumerateCameras();
     setupCanvas();
     return localStream;
@@ -230,6 +234,7 @@
         break;
       case 'blur':
         blurAmount = msg.amount || 0;
+        await replaceTrack();
         break;
     }
   }
