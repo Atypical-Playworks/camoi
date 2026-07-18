@@ -56,12 +56,13 @@
   let pc = null;
   let ws = null;
   let localStream = null;
-  let processedStream = null;
+  let videoSender = null;
   let currentDeviceId = '';
   let currentRotation = 0;
   let isMirrored = false;
   let animFrameId = null;
   let allCameras = [];
+  let canvasCtx = null;
 
   const DEFAULT_QUALITY = '1920x1080@30';
 
@@ -117,12 +118,43 @@
     return localStream;
   }
 
-  async function getProcessedStream() {
-    const needsRotation = currentRotation !== 0;
-    const needsMirror = isMirrored;
+  function startCanvasLoop() {
+    if (animFrameId) cancelAnimationFrame(animFrameId);
 
-    if (!needsRotation && !needsMirror) {
-      processedStream = null;
+    const videoTrack = localStream.getVideoTracks()[0];
+    const settings = videoTrack.getSettings();
+    const srcW = settings.width || 1920;
+    const srcH = settings.height || 1080;
+
+    if (!canvasCtx) canvasCtx = rotateCanvas.getContext('2d');
+
+    function drawFrame() {
+      const isSideways = currentRotation === 90 || currentRotation === 270;
+      const canvasW = isSideways ? srcH : srcW;
+      const canvasH = isSideways ? srcW : srcH;
+
+      if (rotateCanvas.width !== canvasW || rotateCanvas.height !== canvasH) {
+        rotateCanvas.width = canvasW;
+        rotateCanvas.height = canvasH;
+      }
+
+      canvasCtx.clearRect(0, 0, canvasW, canvasH);
+      canvasCtx.save();
+      canvasCtx.translate(canvasW / 2, canvasH / 2);
+      canvasCtx.rotate((currentRotation * Math.PI) / 180);
+      if (isMirrored) canvasCtx.scale(-1, 1);
+      canvasCtx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
+      canvasCtx.restore();
+      animFrameId = requestAnimationFrame(drawFrame);
+    }
+    drawFrame();
+  }
+
+  async function getProcessedStream() {
+    const needsProcessing = currentRotation !== 0 || isMirrored;
+
+    if (!needsProcessing) {
+      if (animFrameId) cancelAnimationFrame(animFrameId);
       return localStream;
     }
 
@@ -132,33 +164,15 @@
     const srcH = settings.height || 1080;
 
     const isSideways = currentRotation === 90 || currentRotation === 270;
-    const canvasW = isSideways ? srcH : srcW;
-    const canvasH = isSideways ? srcW : srcH;
+    rotateCanvas.width = isSideways ? srcH : srcW;
+    rotateCanvas.height = isSideways ? srcW : srcH;
 
-    rotateCanvas.width = canvasW;
-    rotateCanvas.height = canvasH;
-
-    const ctx = rotateCanvas.getContext('2d');
-
-    if (animFrameId) cancelAnimationFrame(animFrameId);
-
-    function drawFrame() {
-      ctx.clearRect(0, 0, canvasW, canvasH);
-      ctx.save();
-      ctx.translate(canvasW / 2, canvasH / 2);
-      ctx.rotate((currentRotation * Math.PI) / 180);
-      if (isMirrored) ctx.scale(-1, 1);
-      ctx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
-      ctx.restore();
-      animFrameId = requestAnimationFrame(drawFrame);
-    }
-    drawFrame();
+    startCanvasLoop();
 
     const fps = parseQuality(DEFAULT_QUALITY).frameRate;
     const canvasStream = rotateCanvas.captureStream(fps);
     const audioTracks = localStream.getAudioTracks();
     if (audioTracks.length > 0) canvasStream.addTrack(audioTracks[0]);
-    processedStream = canvasStream;
     return canvasStream;
   }
 
@@ -197,21 +211,35 @@
       case 'switch-camera':
         currentDeviceId = msg.deviceId;
         await getStream(currentDeviceId, DEFAULT_QUALITY);
-        if (pc) await startCall();
+        await replaceTrack();
         break;
       case 'change-quality':
         await getStream(currentDeviceId, msg.quality);
-        if (pc) await startCall();
+        await replaceTrack();
         break;
       case 'rotate':
         currentRotation = msg.rotation;
-        if (pc) await startCall();
+        await replaceTrack();
         break;
       case 'mirror':
         isMirrored = msg.enabled;
         updatePreviewTransform();
-        if (pc) await startCall();
+        await replaceTrack();
         break;
+    }
+  }
+
+  async function replaceTrack() {
+    if (!pc || !videoSender) return;
+
+    const stream = await getProcessedStream();
+    const newVideoTrack = stream.getVideoTracks()[0];
+
+    try {
+      await videoSender.replaceTrack(newVideoTrack);
+    } catch (e) {
+      console.warn('replaceTrack failed, falling back to renegotiation:', e);
+      await startCall();
     }
   }
 
@@ -222,7 +250,10 @@
     });
 
     const stream = await getProcessedStream();
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+    stream.getTracks().forEach((track) => {
+      const sender = pc.addTrack(track, stream);
+      if (track.kind === 'video') videoSender = sender;
+    });
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
