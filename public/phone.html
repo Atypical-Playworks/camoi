@@ -34,7 +34,7 @@
 </head>
 <body>
   <video id="localVideo" autoplay playsinline muted></video>
-  <canvas id="portraitCanvas"></canvas>
+  <canvas id="rotateCanvas"></canvas>
 
   <div id="ui">
     <h2>📱 iPhone Webcam Bridge</h2>
@@ -46,7 +46,7 @@
 
 <script>
   const localVideo = document.getElementById('localVideo');
-  const portraitCanvas = document.getElementById('portraitCanvas');
+  const rotateCanvas = document.getElementById('rotateCanvas');
   const uiEl = document.getElementById('ui');
   const statusText = document.getElementById('statusText');
   const dot = document.getElementById('dot');
@@ -62,9 +62,6 @@
   let isMirrored = false;
   let animFrameId = null;
   let allCameras = [];
-  let portraitEnabled = false;
-  let selfieSegmentation = null;
-  let canvasCtx = null;
 
   const DEFAULT_QUALITY = '1920x1080@30';
 
@@ -120,29 +117,11 @@
     return localStream;
   }
 
-  async function loadPortraitModel() {
-    if (selfieSegmentation) return;
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js';
-    document.head.appendChild(script);
-    await new Promise((resolve, reject) => {
-      script.onload = resolve;
-      script.onerror = reject;
-    });
-    selfieSegmentation = new window.SelfieSegmentation({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`,
-    });
-    selfieSegmentation.setOptions({ modelSelection: 1 });
-    await selfieSegmentation.initialize();
-    canvasCtx = portraitCanvas.getContext('2d');
-  }
-
   async function getProcessedStream() {
     const needsRotation = currentRotation !== 0;
     const needsMirror = isMirrored;
-    const needsPortrait = portraitEnabled && selfieSegmentation;
 
-    if (!needsRotation && !needsMirror && !needsPortrait) {
+    if (!needsRotation && !needsMirror) {
       processedStream = null;
       return localStream;
     }
@@ -156,55 +135,27 @@
     const canvasW = isSideways ? srcH : srcW;
     const canvasH = isSideways ? srcW : srcH;
 
-    portraitCanvas.width = canvasW;
-    portraitCanvas.height = canvasH;
+    rotateCanvas.width = canvasW;
+    rotateCanvas.height = canvasH;
 
-    if (!canvasCtx) canvasCtx = portraitCanvas.getContext('2d');
+    const ctx = rotateCanvas.getContext('2d');
 
     if (animFrameId) cancelAnimationFrame(animFrameId);
 
-    const fps = parseQuality(DEFAULT_QUALITY).frameRate;
-
-    if (needsPortrait && selfieSegmentation) {
-      async function drawPortraitFrame() {
-        const result = await selfieSegmentation.segmentForVideo(localVideo, performance.now());
-        canvasCtx.clearRect(0, 0, canvasW, canvasH);
-
-        if (result && result.segmentationMask) {
-          canvasCtx.save();
-          canvasCtx.translate(canvasW / 2, canvasH / 2);
-          canvasCtx.rotate((currentRotation * Math.PI) / 180);
-          if (isMirrored) canvasCtx.scale(-1, 1);
-
-          canvasCtx.drawImage(result.segmentationMask, -srcW / 2, -srcH / 2, srcW, srcH);
-          canvasCtx.globalCompositeOperation = 'source-in';
-          canvasCtx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
-          canvasCtx.globalCompositeOperation = 'destination-over';
-
-          canvasCtx.filter = 'blur(20px)';
-          canvasCtx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
-          canvasCtx.filter = 'none';
-          canvasCtx.restore();
-        }
-
-        animFrameId = requestAnimationFrame(drawPortraitFrame);
-      }
-      drawPortraitFrame();
-    } else {
-      function drawFrame() {
-        canvasCtx.clearRect(0, 0, canvasW, canvasH);
-        canvasCtx.save();
-        canvasCtx.translate(canvasW / 2, canvasH / 2);
-        canvasCtx.rotate((currentRotation * Math.PI) / 180);
-        if (isMirrored) canvasCtx.scale(-1, 1);
-        canvasCtx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
-        canvasCtx.restore();
-        animFrameId = requestAnimationFrame(drawFrame);
-      }
-      drawFrame();
+    function drawFrame() {
+      ctx.clearRect(0, 0, canvasW, canvasH);
+      ctx.save();
+      ctx.translate(canvasW / 2, canvasH / 2);
+      ctx.rotate((currentRotation * Math.PI) / 180);
+      if (isMirrored) ctx.scale(-1, 1);
+      ctx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
+      ctx.restore();
+      animFrameId = requestAnimationFrame(drawFrame);
     }
+    drawFrame();
 
-    const canvasStream = portraitCanvas.captureStream(fps);
+    const fps = parseQuality(DEFAULT_QUALITY).frameRate;
+    const canvasStream = rotateCanvas.captureStream(fps);
     const audioTracks = localStream.getAudioTracks();
     if (audioTracks.length > 0) canvasStream.addTrack(audioTracks[0]);
     processedStream = canvasStream;
@@ -259,13 +210,6 @@
       case 'mirror':
         isMirrored = msg.enabled;
         updatePreviewTransform();
-        if (pc) await startCall();
-        break;
-      case 'portrait':
-        portraitEnabled = msg.enabled;
-        if (portraitEnabled) {
-          try { await loadPortraitModel(); } catch (e) { console.warn('MediaPipe load failed:', e); break; }
-        }
         if (pc) await startCall();
         break;
     }

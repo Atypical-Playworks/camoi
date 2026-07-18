@@ -66,15 +66,9 @@
       </select>
     </div>
 
-    <div class="row" style="display:flex;gap:10px">
-      <div style="flex:1">
-        <label>🪞 Espejo</label>
-        <button id="mirrorBtn" class="off">OFF</button>
-      </div>
-      <div style="flex:1">
-        <label>🎭 Retrato</label>
-        <button id="portraitBtn" class="off">OFF</button>
-      </div>
+    <div class="row">
+      <label>🪞 Espejo</label>
+      <button id="mirrorBtn" class="off">OFF</button>
     </div>
 
     <div class="status">
@@ -88,7 +82,6 @@
   const qualitySelect = document.getElementById('qualitySelect');
   const rotateSelect = document.getElementById('rotateSelect');
   const mirrorBtn = document.getElementById('mirrorBtn');
-  const portraitBtn = document.getElementById('portraitBtn');
   const dotPhone = document.getElementById('dotPhone');
   const dotViewer = document.getElementById('dotViewer');
   const stPhone = document.getElementById('stPhone');
@@ -100,7 +93,6 @@
   let phoneConnected = false;
   let viewerConnected = false;
   let mirrorOn = false;
-  let portraitOn = false;
 
   function send(msg) {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -150,13 +142,6 @@
     mirrorBtn.textContent = mirrorOn ? 'ON' : 'OFF';
     mirrorBtn.className = mirrorOn ? 'on' : 'off';
     send({ type: 'control', action: 'mirror', enabled: mirrorOn });
-  });
-
-  portraitBtn.addEventListener('click', () => {
-    portraitOn = !portraitOn;
-    portraitBtn.textContent = portraitOn ? 'ON' : 'OFF';
-    portraitBtn.className = portraitOn ? 'on' : 'off';
-    send({ type: 'control', action: 'portrait', enabled: portraitOn });
   });
 </script>
 </body>
