@@ -7,6 +7,8 @@
 <style>
   html, body { margin: 0; height: 100%; background: #0d1115; overflow: hidden; }
   video { width: 100%; height: 100%; object-fit: cover; }
+  #localVideo { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #previewVideo { position: fixed; inset: 0; }
   canvas { display: none; }
   #ui {
     position: fixed; inset: 0; display: flex; flex-direction: column;
@@ -30,10 +32,24 @@
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
   .dot.on { background: #3fb950; }
   .dot.off { background: #f85149; }
+  #phoneControls {
+    position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 10;
+    display: none; gap: 8px; flex-wrap: wrap; padding: 10px;
+    background: rgba(0, 0, 0, .72); border-radius: 12px;
+    font-family: -apple-system, sans-serif;
+    color: #fff;
+  }
+  #phoneControls select, #phoneControls button {
+    flex: 1 1 140px; min-width: 0; padding: 9px 10px; border-radius: 8px;
+    border: 1px solid #444; background: #161b22; color: #fff; font-size: 13px;
+  }
+  #phoneControls button { cursor: pointer; }
+  #phoneControls button.on { background: #238636; }
 </style>
 </head>
 <body>
   <video id="localVideo" autoplay playsinline muted></video>
+  <video id="previewVideo" autoplay playsinline muted></video>
   <canvas id="rotateCanvas"></canvas>
 
   <div id="ui">
@@ -44,14 +60,47 @@
 
   <div id="status"><span class="dot off" id="dot"></span><span id="statusText">Desconectado</span></div>
 
+  <div id="phoneControls">
+    <select id="phoneCameraSelect"><option value="">Cámara</option></select>
+    <select id="phoneQualitySelect">
+      <option value="1280x720@30">720p 30fps</option>
+      <option value="1280x720@60">720p 60fps</option>
+      <option value="1920x1080@30" selected>1080p 30fps</option>
+      <option value="1920x1080@60">1080p 60fps</option>
+      <option value="3840x2160@30">4K 30fps</option>
+      <option value="3840x2160@60">4K 60fps</option>
+    </select>
+    <select id="phoneRotateSelect">
+      <option value="0">Rotación 0°</option>
+      <option value="90">Rotación 90°</option>
+      <option value="180">Rotación 180°</option>
+      <option value="270">Rotación 270°</option>
+    </select>
+    <button id="phoneMirrorBtn">Espejo: OFF</button>
+    <label style="flex:1 1 180px;display:flex;align-items:center;gap:8px;font-size:13px">
+      Blur <input id="phoneBlurRange" type="range" min="0" max="80" value="0" style="flex:1" />
+      <span id="phoneBlurValue">OFF</span>
+    </label>
+    <span id="blurStatus" style="flex:1 1 100%;font-size:12px;opacity:.8">Blur desactivado</span>
+  </div>
+
 <script>
   const localVideo = document.getElementById('localVideo');
+  const previewVideo = document.getElementById('previewVideo');
   const rotateCanvas = document.getElementById('rotateCanvas');
   const uiEl = document.getElementById('ui');
   const statusText = document.getElementById('statusText');
   const dot = document.getElementById('dot');
   const startBtn = document.getElementById('startBtn');
   const hintEl = document.getElementById('hint');
+  const phoneControls = document.getElementById('phoneControls');
+  const phoneCameraSelect = document.getElementById('phoneCameraSelect');
+  const phoneQualitySelect = document.getElementById('phoneQualitySelect');
+  const phoneRotateSelect = document.getElementById('phoneRotateSelect');
+  const phoneMirrorBtn = document.getElementById('phoneMirrorBtn');
+  const phoneBlurRange = document.getElementById('phoneBlurRange');
+  const phoneBlurValue = document.getElementById('phoneBlurValue');
+  const blurStatus = document.getElementById('blurStatus');
 
   let pc = null;
   let ws = null;
@@ -69,6 +118,9 @@
   let videoHeight = 1080;
   let personCanvas = null;
   let personCtx = null;
+  let backgroundCanvas = null;
+  let backgroundCtx = null;
+  let supportsCanvasFilter = false;
   let segmentationInput = null;
   let selfieSegmentation = null;
   let latestMask = null;
@@ -78,6 +130,7 @@
   const DEFAULT_QUALITY = '1920x1080@30';
   const SEGMENTATION_WIDTH = 256;
   const SEGMENTATION_HEIGHT = 144;
+  const SEGMENTATION_INTERVAL = 33;
 
   function setStatus(text, connected) {
     statusText.textContent = text;
@@ -110,6 +163,13 @@
       type: 'cameras',
       cameras: allCameras.map((c) => ({ deviceId: c.deviceId, label: c.label })),
     }));
+    phoneCameraSelect.innerHTML = '';
+    allCameras.forEach((camera) => {
+      const option = document.createElement('option');
+      option.value = camera.deviceId;
+      option.textContent = camera.label || 'Cámara';
+      phoneCameraSelect.appendChild(option);
+    });
   }
 
   function sendState() {
@@ -168,6 +228,7 @@
     selfieSegmentation.setOptions({ modelSelection: 1 });
     selfieSegmentation.onResults((results) => {
       latestMask = results.segmentationMask;
+      blurStatus.textContent = 'Máscara activa: sujeto detectado';
     });
 
     segmentationInput = document.createElement('canvas');
@@ -177,6 +238,9 @@
     personCanvas.width = videoWidth;
     personCanvas.height = videoHeight;
     personCtx = personCanvas.getContext('2d');
+    backgroundCanvas = document.createElement('canvas');
+    backgroundCtx = backgroundCanvas.getContext('2d');
+    supportsCanvasFilter = 'filter' in backgroundCtx;
   }
 
   function startSegmentation() {
@@ -193,9 +257,10 @@
         await selfieSegmentation.send({ image: segmentationInput });
       } catch (error) {
         console.warn('Segmentation failed:', error);
+        blurStatus.textContent = 'Error procesando segmentación';
       } finally {
         segmentationBusy = false;
-        if (blurAmount > 0) segmentationTimer = setTimeout(processFrame, 66);
+        if (blurAmount > 0) segmentationTimer = setTimeout(processFrame, SEGMENTATION_INTERVAL);
       }
     };
 
@@ -205,7 +270,7 @@
   function stopSegmentation() {
     if (segmentationTimer) clearTimeout(segmentationTimer);
     segmentationTimer = null;
-    latestMask = null;
+    blurStatus.textContent = 'Blur desactivado';
   }
 
   function setupCanvas() {
@@ -224,25 +289,58 @@
       }
 
       canvasCtx.clearRect(0, 0, canvasW, canvasH);
-      canvasCtx.save();
-      canvasCtx.translate(canvasW / 2, canvasH / 2);
-      canvasCtx.rotate((currentRotation * Math.PI) / 180);
-      if (isMirrored) canvasCtx.scale(-1, 1);
-      canvasCtx.filter = blurAmount > 0 ? `blur(${blurAmount}px)` : 'none';
-      canvasCtx.drawImage(localVideo, -videoWidth / 2, -videoHeight / 2, videoWidth, videoHeight);
-      canvasCtx.restore();
+      if (blurAmount > 0) {
+        const blurFactor = supportsCanvasFilter ? 2 : Math.max(2, Math.round(2 + blurAmount / 2));
+        const backgroundW = Math.max(1, Math.round(canvasW / blurFactor));
+        const backgroundH = Math.max(1, Math.round(canvasH / blurFactor));
+        if (backgroundCanvas.width !== backgroundW || backgroundCanvas.height !== backgroundH) {
+          backgroundCanvas.width = backgroundW;
+          backgroundCanvas.height = backgroundH;
+        }
+        backgroundCtx.clearRect(0, 0, backgroundW, backgroundH);
+        backgroundCtx.imageSmoothingEnabled = true;
+        backgroundCtx.imageSmoothingQuality = 'high';
+        backgroundCtx.save();
+        backgroundCtx.translate(backgroundW / 2, backgroundH / 2);
+        backgroundCtx.rotate((currentRotation * Math.PI) / 180);
+        if (isMirrored) backgroundCtx.scale(-1, 1);
+        backgroundCtx.filter = supportsCanvasFilter
+          ? `blur(${Math.max(1, blurAmount / 2)}px)`
+          : 'none';
+        backgroundCtx.drawImage(
+          localVideo,
+          -videoWidth / (blurFactor * 2),
+          -videoHeight / (blurFactor * 2),
+          videoWidth / blurFactor,
+          videoHeight / blurFactor,
+        );
+        backgroundCtx.restore();
+        backgroundCtx.filter = 'none';
+        canvasCtx.imageSmoothingEnabled = true;
+        canvasCtx.drawImage(backgroundCanvas, 0, 0, canvasW, canvasH);
+      } else {
+        canvasCtx.save();
+        canvasCtx.translate(canvasW / 2, canvasH / 2);
+        canvasCtx.rotate((currentRotation * Math.PI) / 180);
+        if (isMirrored) canvasCtx.scale(-1, 1);
+        canvasCtx.drawImage(localVideo, -videoWidth / 2, -videoHeight / 2, videoWidth, videoHeight);
+        canvasCtx.restore();
+      }
 
       if (blurAmount > 0 && latestMask && personCtx) {
-        personCanvas.width = canvasW;
-        personCanvas.height = canvasH;
+        if (personCanvas.width !== canvasW || personCanvas.height !== canvasH) {
+          personCanvas.width = canvasW;
+          personCanvas.height = canvasH;
+        }
         personCtx.clearRect(0, 0, canvasW, canvasH);
         personCtx.save();
         personCtx.translate(canvasW / 2, canvasH / 2);
         personCtx.rotate((currentRotation * Math.PI) / 180);
         if (isMirrored) personCtx.scale(-1, 1);
-        personCtx.drawImage(latestMask, -videoWidth / 2, -videoHeight / 2, videoWidth, videoHeight);
-        personCtx.globalCompositeOperation = 'source-in';
         personCtx.drawImage(localVideo, -videoWidth / 2, -videoHeight / 2, videoWidth, videoHeight);
+        personCtx.globalCompositeOperation = 'destination-in';
+        personCtx.drawImage(latestMask, -videoWidth / 2, -videoHeight / 2, videoWidth, videoHeight);
+        personCtx.globalCompositeOperation = 'source-over';
         personCtx.restore();
         canvasCtx.drawImage(personCanvas, 0, 0, canvasW, canvasH);
       }
@@ -255,11 +353,12 @@
       const audioTracks = localStream.getAudioTracks();
       if (audioTracks.length > 0) canvasStream.addTrack(audioTracks[0]);
     }
+    previewVideo.srcObject = canvasStream;
   }
 
   function getActiveStream() {
     const needsProcessing = currentRotation !== 0 || isMirrored || blurAmount > 0;
-    return needsProcessing ? canvasStream : localStream;
+    return canvasStream || localStream;
   }
 
   function connectSignaling() {
@@ -280,6 +379,7 @@
         await pc.setRemoteDescription(new RTCSessionDescription(msg.payload));
         setStatus('Transmitiendo a la PC', true);
         uiEl.style.display = 'none';
+        phoneControls.style.display = 'flex';
       } else if (msg.type === 'candidate') {
         try { await pc.addIceCandidate(msg.payload); } catch (e) { console.warn(e); }
       } else if (msg.type === 'viewer-ready') {
@@ -307,23 +407,35 @@
         break;
       case 'rotate':
         currentRotation = msg.rotation;
+        phoneRotateSelect.value = String(currentRotation);
         break;
       case 'mirror':
         isMirrored = msg.enabled;
         updatePreviewTransform();
+        phoneMirrorBtn.textContent = `Espejo: ${isMirrored ? 'ON' : 'OFF'}`;
+        phoneMirrorBtn.className = isMirrored ? 'on' : '';
         break;
       case 'blur':
         blurAmount = msg.amount || 0;
+        phoneBlurRange.value = String(blurAmount);
+        phoneBlurValue.textContent = blurAmount ? `${blurAmount}px` : 'OFF';
         if (blurAmount > 0) {
+          blurStatus.textContent = 'Cargando segmentación...';
           try {
             await ensureSegmentation();
             startSegmentation();
           } catch (error) {
             console.warn('Could not load segmentation:', error);
             blurAmount = 0;
+            phoneBlurRange.value = '0';
+            phoneBlurValue.textContent = 'OFF';
+            const reason = error && error.message ? error.message.slice(0, 100) : 'error desconocido';
+            blurStatus.textContent = `Error MediaPipe: ${reason}`;
+            setStatus('Blur no disponible: no cargó MediaPipe', false);
           }
         } else {
           stopSegmentation();
+          blurStatus.textContent = 'Blur desactivado';
         }
         await replaceTrack();
         break;
@@ -382,6 +494,29 @@
       console.error('Camera error:', err);
       hintEl.textContent = '❌ No se pudo acceder a la cámara: ' + err.message;
     }
+  });
+
+  phoneCameraSelect.addEventListener('change', () => {
+    handleControl({ action: 'switch-camera', deviceId: phoneCameraSelect.value });
+  });
+
+  phoneQualitySelect.addEventListener('change', () => {
+    handleControl({ action: 'change-quality', quality: phoneQualitySelect.value });
+  });
+
+  phoneRotateSelect.addEventListener('change', () => {
+    handleControl({ action: 'rotate', rotation: Number(phoneRotateSelect.value) });
+  });
+
+  phoneMirrorBtn.addEventListener('click', () => {
+    handleControl({ action: 'mirror', enabled: !isMirrored });
+  });
+
+  phoneBlurRange.addEventListener('input', () => {
+    const amount = Number(phoneBlurRange.value);
+    phoneBlurValue.textContent = amount ? `${amount}px` : 'OFF';
+    clearTimeout(phoneBlurRange.blurTimer);
+    phoneBlurRange.blurTimer = setTimeout(() => handleControl({ action: 'blur', amount }), 120);
   });
 </script>
 </body>

@@ -190,10 +190,11 @@ PC (control.html) → server.js → iPhone (phone.html) → updated stream
 
 ## 🎭 Background Blur
 
-Camoi uses MediaPipe Selfie Segmentation to separate the person from the background. The background is blurred while the person remains sharp.
+Camoi uses MediaPipe Selfie Segmentation to separate the main subject from the background. It prioritizes smooth real-time performance over strict person-only classification.
 
 - Blur levels: 5px, 10px, and 20px
-- Segmentation input is reduced to 256x144 to protect performance
+- Segmentation input is reduced to 256x144 and processed every 100ms to balance quality and performance
+- The mask updates at approximately 30 FPS on compatible devices
 - The model loads from CDN the first time blur is enabled
 - Processing stays on the iPhone; video is not uploaded to a cloud service
 

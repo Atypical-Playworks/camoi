@@ -75,7 +75,7 @@ Lado **offerer** del WebRTC. Funciones:
 - Recibe comandos `control` desde control.html vía WebSocket
 - Cambia cámara, calidad, rotación, espejo en tiempo reals
 - Canvas-based rotation/mirror (captureStream)
-- **MediaPipe Selfie Segmentation** para modo retrato (blur de fondo)
+- **MediaPipe Image Segmenter** con máscara exclusiva de la categoría persona
 - Crea la oferta WebRTC y la envía al servidor de señalización
 - Conexión WebSocket al servidor con `?role=phone`
 - Simplificado: solo botón "Iniciar cámara", todo el control es remoto
@@ -147,12 +147,12 @@ Lanza OBS Studio con flags especiales necesarios para que WebRTC funcione en Bro
 
 ## Modo retrato (MediaPipe)
 
-- Usa `@mediapipe/selfie_segmentation` desde CDN
-- Modelo ~1MB, carga dinámica solo cuando se activa
+- Usa `@mediapipe/tasks-vision` desde CDN
+- Modelo DeepLab, carga dinámica solo cuando se activa
 - Procesa cada frame en canvas:
-  1. Obtiene `segmentationMask` del modelo
-  2. Dibuja máscara con `globalCompositeOperation: 'source-in'`
-  3. Aplica blur de fondo con `ctx.filter = 'blur(20px)'`
+  1. Obtiene la máscara de categorías del modelo
+  2. Conserva únicamente la categoría `person`
+  3. Aplica blur al fondo y superpone la persona nítida
 - Rendimiento: ~30fps en iPhone 15 Pro, puede bajar en modelos anteriores
 - Se aplica al stream enviado al viewer/OBS, no solo al preview local
 

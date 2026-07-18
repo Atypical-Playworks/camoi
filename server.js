@@ -30,11 +30,16 @@ function getLocalIPs() {
 }
 
 const app = express();
-app.use(express.static(path.join(__dirname, 'public')));
+const staticOptions = {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+  },
+};
+app.use(express.static(path.join(__dirname, 'public'), staticOptions));
 
 // Servidor HTTP: sirve viewer.html (sin cert, para OBS) y el certificado para el iPhone.
 const httpApp = express();
-httpApp.use(express.static(path.join(__dirname, 'public')));
+httpApp.use(express.static(path.join(__dirname, 'public'), staticOptions));
 httpApp.get('/cert', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'application/x-x509-ca-cert',

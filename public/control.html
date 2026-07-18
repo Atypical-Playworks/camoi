@@ -22,6 +22,9 @@
     border: 1px solid #30363d; background: #0d1117; color: #e6edf3;
   }
   .row button { cursor: pointer; font-weight: 600; }
+  .range-row { display: flex; align-items: center; gap: 10px; }
+  .range-row input { flex: 1; accent-color: #2f81f7; }
+  .range-value { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
   .row button.on { background: #238636; border-color: #2ea043; }
   .row button.off { background: #21262d; }
   .row button:active { transform: scale(.98); }
@@ -73,12 +76,10 @@
 
     <div class="row">
       <label>🌫️ Blur de fondo</label>
-      <select id="blurSelect">
-        <option value="0" selected>Desactivado</option>
-        <option value="5">Leve (5px)</option>
-        <option value="10">Medio (10px)</option>
-        <option value="20">Fuerte (20px)</option>
-      </select>
+      <div class="range-row">
+        <input id="blurRange" type="range" min="0" max="80" step="1" value="0" />
+        <span class="range-value" id="blurValue">OFF</span>
+      </div>
     </div>
 
     <div class="status">
@@ -92,7 +93,8 @@
   const qualitySelect = document.getElementById('qualitySelect');
   const rotateSelect = document.getElementById('rotateSelect');
   const mirrorBtn = document.getElementById('mirrorBtn');
-  const blurSelect = document.getElementById('blurSelect');
+  const blurRange = document.getElementById('blurRange');
+  const blurValue = document.getElementById('blurValue');
   const dotPhone = document.getElementById('dotPhone');
   const dotViewer = document.getElementById('dotViewer');
   const stPhone = document.getElementById('stPhone');
@@ -105,6 +107,7 @@
   let viewerConnected = false;
   let mirrorOn = false;
   let ignoreEvents = false;
+  let blurTimer = null;
 
   function send(msg) {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -123,8 +126,14 @@
     mirrorOn = state.mirror;
     mirrorBtn.textContent = mirrorOn ? 'ON' : 'OFF';
     mirrorBtn.className = mirrorOn ? 'on' : 'off';
-    blurSelect.value = state.blur;
+    blurRange.value = state.blur;
+    updateBlurValue();
     ignoreEvents = false;
+  }
+
+  function updateBlurValue() {
+    const amount = Number(blurRange.value);
+    blurValue.textContent = amount === 0 ? 'OFF' : `${amount}px`;
   }
 
   ws.onmessage = (event) => {
@@ -169,10 +178,15 @@
     send({ type: 'control', action: 'mirror', enabled: mirrorOn });
   });
 
-  blurSelect.addEventListener('change', () => {
+  blurRange.addEventListener('input', () => {
     if (ignoreEvents) return;
-    send({ type: 'control', action: 'blur', amount: parseInt(blurSelect.value, 10) });
+    updateBlurValue();
+    clearTimeout(blurTimer);
+    blurTimer = setTimeout(() => {
+      send({ type: 'control', action: 'blur', amount: parseInt(blurRange.value, 10) });
+    }, 120);
   });
+  updateBlurValue();
 </script>
 </body>
 </html>
