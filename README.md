@@ -11,7 +11,7 @@ Camo costs $80/year. DroidCam needs signed drivers. Both depend on third-party a
 So I built Camoi — a tool that:
 
 - Uses your iPhone's camera as a webcam via WebRTC (peer-to-peer, no cloud)
-- Controls everything remotely from your PC (camera, quality, rotation, mirror, portrait mode)
+- Controls everything remotely from your PC (camera, quality, rotation, mirror, background blur)
 - Integrates with OBS Studio as a virtual camera — Zoom, Teams, Discord all recognize it
 - Runs 100% on your local network. Nothing leaves your WiFi.
 
@@ -85,7 +85,7 @@ Then follow the 3 steps shown in the terminal:
 
 3. **Open control.html on PC**
    - Chrome/Edge → `http://localhost:8080/control.html`
-   - Control camera, quality, rotation, mirror, portrait mode
+   - Control camera, quality, rotation, mirror, background blur
 
 ### Using Tailscale (Required)
 
@@ -147,7 +147,7 @@ Built for speed and simplicity:
 camoi/
 ├── server.js              # Express + WebSocket (signaling + control)
 ├── public/
-│   ├── phone.html         # iPhone client (WebRTC offerer + MediaPipe)
+│   ├── phone.html         # iPhone client (WebRTC offerer + segmentation blur)
 │   ├── viewer.html        # PC/OBS client (WebRTC answerer, video-only)
 │   └── control.html       # Remote control panel for PC
 ├── generate-cert.js       # Generate self-signed certificates
@@ -185,14 +185,24 @@ PC (control.html) → server.js → iPhone (phone.html) → updated stream
 { "type": "control", "action": "change-quality", "quality": "1920x1080@60" }
 { "type": "control", "action": "rotate", "rotation": 90 }
 { "type": "control", "action": "mirror", "enabled": true }
-{ "type": "control", "action": "portrait", "enabled": true }
+{ "type": "control", "action": "blur", "amount": 10 }
 ```
+
+## 🎭 Background Blur
+
+Camoi uses MediaPipe Selfie Segmentation to separate the person from the background. The background is blurred while the person remains sharp.
+
+- Blur levels: 5px, 10px, and 20px
+- Segmentation input is reduced to 256x144 to protect performance
+- The model loads from CDN the first time blur is enabled
+- Processing stays on the iPhone; video is not uploaded to a cloud service
 
 ## ⚠️ Known Limitations
 
 - **One iPhone at a time** — Server supports one phone and one viewer simultaneously
 - **No auto-reconnection** — If connection drops, reload phone.html
 - **Battery** — WebRTC + 1080p camera can heat up iPhone in long sessions
+- **Background blur** — Uses additional CPU/GPU and may reduce FPS on older iPhones
 - **Certificate** — If you change WiFi network, re-run `npm run gen-cert`
 
 ## 🐛 Troubleshooting
