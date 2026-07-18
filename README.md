@@ -28,7 +28,6 @@ Features:
 - 🎬 **Quality selector** — 720p, 1080p, 4K @ 30/60fps
 - 🔄 **Rotation** — 0°, 90°, 180°, 270°
 - 🪞 **Mirror mode** — ON/OFF
-- 🎭 **Portrait mode** — Background blur using MediaPipe AI
 
 ### 2️⃣ OBS Studio Integration
 
@@ -38,15 +37,7 @@ No signed drivers needed. OBS already has virtual camera support built-in — Ca
 iPhone → WebRTC → viewer.html → OBS Browser Source → Virtual Camera → Zoom/Teams/Discord
 ```
 
-### 3️⃣ Portrait Mode with AI Blur
-
-Background blur using MediaPipe Selfie Segmentation. Runs entirely on your iPhone — no internet, no cloud processing.
-
-- Model: ~1MB, loads dynamically
-- Performance: ~30fps on iPhone 15 Pro
-- Quality: Good enough for professional video calls
-
-### 4️⃣ Zero Internet Dependency
+### 3️⃣ Zero Internet Dependency
 
 Everything runs on your local network. No cloud, no accounts, no data collection. Your video stays between your iPhone and your PC.
 
@@ -136,7 +127,7 @@ Then in OBS:
 > - Quality selector (720p/1080p/4K @ 30/60fps)
 > - Rotation selector (0°/90°/180°/270°)
 > - Mirror toggle (ON/OFF)
-> - Portrait mode toggle (ON/OFF)
+> - Mirror toggle (ON/OFF)
 > - Connection status indicators
 
 ## 🛠️ Tech Stack
@@ -147,7 +138,6 @@ Built for speed and simplicity:
 - **WebSocket (`ws`)** — Signaling, lighter than Socket.IO
 - **WebRTC** — P2P video, low latency, adaptive bitrate
 - **HTML/JS Vanilla** — No frameworks, no bundlers
-- **MediaPipe Selfie Segmentation** — AI portrait mode
 - **OBS Studio** — Virtual camera (avoids signed driver requirement)
 - **Self-signed TLS certificates** — Required by iOS Safari
 
@@ -198,23 +188,11 @@ PC (control.html) → server.js → iPhone (phone.html) → updated stream
 { "type": "control", "action": "portrait", "enabled": true }
 ```
 
-## 🎭 Portrait Mode
-
-Background blur using MediaPipe Selfie Segmentation:
-
-- **How it works**: Loads a ~1MB ML model from CDN, processes each frame on canvas
-- **Performance**: ~30fps on iPhone 15 Pro, may drop on older models
-- **Battery**: Uses more CPU/GPU, use only when needed
-- **Quality**: Not as good as iPhone native portrait, but good enough for video calls
-
-Toggle ON/OFF from the control panel.
-
 ## ⚠️ Known Limitations
 
 - **One iPhone at a time** — Server supports one phone and one viewer simultaneously
 - **No auto-reconnection** — If connection drops, reload phone.html
 - **Battery** — WebRTC + 1080p camera can heat up iPhone in long sessions
-- **Portrait mode** — Extra CPU usage, may reduce FPS on older iPhones
 - **Certificate** — If you change WiFi network, re-run `npm run gen-cert`
 
 ## 🐛 Troubleshooting
