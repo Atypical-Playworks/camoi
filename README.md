@@ -55,6 +55,7 @@ Everything runs on your local network. No cloud, no accounts, no data collection
 ### Prerequisites
 - **Node.js** (v18+) — [nodejs.org](https://nodejs.org)
 - **OBS Studio** (free) — [obsproject.com](https://obsproject.com)
+- **Tailscale** (free) — [tailscale.com](https://tailscale.com) — Required because Safari blocks direct local network connections
 - iPhone and PC on the **same WiFi network**
 
 ### Installation
@@ -84,16 +85,29 @@ npm start
 Then follow the 3 steps shown in the terminal:
 
 1. **Install certificate on iPhone** (one-time)
-   - Open Safari on iPhone → go to `http://YOUR-PC-IP:8080/cert`
+   - Open Safari on iPhone → go to `http://YOUR-TAILSCALE-IP:8080/cert`
    - Install the profile and trust it in Settings
 
 2. **Open phone.html on iPhone**
-   - Safari → `https://YOUR-PC-IP:8443/phone.html`
+   - Safari → `https://YOUR-TAILSCALE-IP:8443/phone.html`
    - Tap "Start Camera"
 
 3. **Open control.html on PC**
    - Chrome/Edge → `http://localhost:8080/control.html`
    - Control camera, quality, rotation, mirror, portrait mode
+
+### Using Tailscale (Required)
+
+Tailscale is required because Safari blocks direct local network connections for security reasons. Tailscale creates a secure tunnel that bypasses this restriction.
+
+1. Install Tailscale on both iPhone and PC
+2. Log in to the same account on both devices
+3. The server automatically detects your Tailscale IP (`100.x.x.x`)
+4. Use the Tailscale IP shown in the terminal:
+   ```
+   https://100.x.x.x:8443/phone.html
+   ```
+5. Make sure Tailscale is running on both devices when using Camoi
 
 ### OBS Studio Setup
 
@@ -211,7 +225,8 @@ Toggle ON/OFF from the control panel.
 - Restart PC after installing certificate
 
 ### iPhone won't connect
-- Verify iPhone and PC are on the **same WiFi network**
+- Verify Tailscale is running on both iPhone and PC
+- Verify you're using the Tailscale IP (starts with `100.x.x.x`)
 - Verify certificate is installed and trusted on iPhone
 - Try opening `https://YOUR-PC-IP:8443/phone.html` directly in Safari
 
