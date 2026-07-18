@@ -67,8 +67,17 @@
   let canvasCtx = null;
   let videoWidth = 1920;
   let videoHeight = 1080;
+  let personCanvas = null;
+  let personCtx = null;
+  let segmentationInput = null;
+  let selfieSegmentation = null;
+  let latestMask = null;
+  let segmentationBusy = false;
+  let segmentationTimer = null;
 
   const DEFAULT_QUALITY = '1920x1080@30';
+  const SEGMENTATION_WIDTH = 256;
+  const SEGMENTATION_HEIGHT = 144;
 
   function setStatus(text, connected) {
     statusText.textContent = text;
@@ -141,6 +150,64 @@
     return localStream;
   }
 
+  async function ensureSegmentation() {
+    if (selfieSegmentation) return;
+
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js';
+    script.crossOrigin = 'anonymous';
+    document.head.appendChild(script);
+    await new Promise((resolve, reject) => {
+      script.onload = resolve;
+      script.onerror = reject;
+    });
+
+    selfieSegmentation = new window.SelfieSegmentation({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`,
+    });
+    selfieSegmentation.setOptions({ modelSelection: 1 });
+    selfieSegmentation.onResults((results) => {
+      latestMask = results.segmentationMask;
+    });
+
+    segmentationInput = document.createElement('canvas');
+    segmentationInput.width = SEGMENTATION_WIDTH;
+    segmentationInput.height = SEGMENTATION_HEIGHT;
+    personCanvas = document.createElement('canvas');
+    personCanvas.width = videoWidth;
+    personCanvas.height = videoHeight;
+    personCtx = personCanvas.getContext('2d');
+  }
+
+  function startSegmentation() {
+    if (segmentationTimer || !selfieSegmentation) return;
+
+    const processFrame = async () => {
+      segmentationTimer = null;
+      if (blurAmount <= 0 || segmentationBusy) return;
+
+      segmentationBusy = true;
+      const inputCtx = segmentationInput.getContext('2d');
+      inputCtx.drawImage(localVideo, 0, 0, SEGMENTATION_WIDTH, SEGMENTATION_HEIGHT);
+      try {
+        await selfieSegmentation.send({ image: segmentationInput });
+      } catch (error) {
+        console.warn('Segmentation failed:', error);
+      } finally {
+        segmentationBusy = false;
+        if (blurAmount > 0) segmentationTimer = setTimeout(processFrame, 66);
+      }
+    };
+
+    processFrame();
+  }
+
+  function stopSegmentation() {
+    if (segmentationTimer) clearTimeout(segmentationTimer);
+    segmentationTimer = null;
+    latestMask = null;
+  }
+
   function setupCanvas() {
     if (!canvasCtx) canvasCtx = rotateCanvas.getContext('2d');
 
@@ -161,11 +228,24 @@
       canvasCtx.translate(canvasW / 2, canvasH / 2);
       canvasCtx.rotate((currentRotation * Math.PI) / 180);
       if (isMirrored) canvasCtx.scale(-1, 1);
-      if (blurAmount > 0) {
-        canvasCtx.filter = `blur(${blurAmount}px)`;
-      }
+      canvasCtx.filter = blurAmount > 0 ? `blur(${blurAmount}px)` : 'none';
       canvasCtx.drawImage(localVideo, -videoWidth / 2, -videoHeight / 2, videoWidth, videoHeight);
       canvasCtx.restore();
+
+      if (blurAmount > 0 && latestMask && personCtx) {
+        personCanvas.width = canvasW;
+        personCanvas.height = canvasH;
+        personCtx.clearRect(0, 0, canvasW, canvasH);
+        personCtx.save();
+        personCtx.translate(canvasW / 2, canvasH / 2);
+        personCtx.rotate((currentRotation * Math.PI) / 180);
+        if (isMirrored) personCtx.scale(-1, 1);
+        personCtx.drawImage(latestMask, -videoWidth / 2, -videoHeight / 2, videoWidth, videoHeight);
+        personCtx.globalCompositeOperation = 'source-in';
+        personCtx.drawImage(localVideo, -videoWidth / 2, -videoHeight / 2, videoWidth, videoHeight);
+        personCtx.restore();
+        canvasCtx.drawImage(personCanvas, 0, 0, canvasW, canvasH);
+      }
       animFrameId = requestAnimationFrame(drawFrame);
     }
     drawFrame();
@@ -234,6 +314,17 @@
         break;
       case 'blur':
         blurAmount = msg.amount || 0;
+        if (blurAmount > 0) {
+          try {
+            await ensureSegmentation();
+            startSegmentation();
+          } catch (error) {
+            console.warn('Could not load segmentation:', error);
+            blurAmount = 0;
+          }
+        } else {
+          stopSegmentation();
+        }
         await replaceTrack();
         break;
     }
