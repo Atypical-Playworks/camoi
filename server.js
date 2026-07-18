@@ -64,6 +64,7 @@ function broadcastStatus() {
     controlSocket.send(status);
     if (phoneSocket && phoneSocket.readyState === phoneSocket.OPEN) {
       phoneSocket.send(JSON.stringify({ type: 'request-cameras' }));
+      phoneSocket.send(JSON.stringify({ type: 'request-state' }));
     }
   }
 }
@@ -101,6 +102,13 @@ function handleSignaling(ws, req, protocol) {
     }
 
     if (role === 'phone' && msg.type === 'cameras') {
+      if (controlSocket && controlSocket.readyState === controlSocket.OPEN) {
+        controlSocket.send(JSON.stringify(msg));
+      }
+      return;
+    }
+
+    if (role === 'phone' && msg.type === 'state') {
       if (controlSocket && controlSocket.readyState === controlSocket.OPEN) {
         controlSocket.send(JSON.stringify(msg));
       }

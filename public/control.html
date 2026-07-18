@@ -71,6 +71,16 @@
       <button id="mirrorBtn" class="off">OFF</button>
     </div>
 
+    <div class="row">
+      <label>🌫️ Blur de fondo</label>
+      <select id="blurSelect">
+        <option value="0" selected>Desactivado</option>
+        <option value="5">Leve (5px)</option>
+        <option value="10">Medio (10px)</option>
+        <option value="20">Fuerte (20px)</option>
+      </select>
+    </div>
+
     <div class="status">
       <div class="line"><span class="dot off" id="dotPhone"></span>Phone: <span id="stPhone">desconectado</span></div>
       <div class="line"><span class="dot off" id="dotViewer"></span>Viewer: <span id="stViewer">desconectado</span></div>
@@ -82,6 +92,7 @@
   const qualitySelect = document.getElementById('qualitySelect');
   const rotateSelect = document.getElementById('rotateSelect');
   const mirrorBtn = document.getElementById('mirrorBtn');
+  const blurSelect = document.getElementById('blurSelect');
   const dotPhone = document.getElementById('dotPhone');
   const dotViewer = document.getElementById('dotViewer');
   const stPhone = document.getElementById('stPhone');
@@ -93,6 +104,7 @@
   let phoneConnected = false;
   let viewerConnected = false;
   let mirrorOn = false;
+  let ignoreEvents = false;
 
   function send(msg) {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -103,6 +115,16 @@
     dotViewer.className = `dot ${viewerConnected ? 'on' : 'off'}`;
     stPhone.textContent = phoneConnected ? 'conectado' : 'desconectado';
     stViewer.textContent = viewerConnected ? 'conectado' : 'desconectado';
+  }
+
+  function applyState(state) {
+    ignoreEvents = true;
+    rotateSelect.value = state.rotation;
+    mirrorOn = state.mirror;
+    mirrorBtn.textContent = mirrorOn ? 'ON' : 'OFF';
+    mirrorBtn.className = mirrorOn ? 'on' : 'off';
+    blurSelect.value = state.blur;
+    ignoreEvents = false;
   }
 
   ws.onmessage = (event) => {
@@ -119,6 +141,8 @@
         opt.textContent = cam.label;
         cameraSelect.appendChild(opt);
       });
+    } else if (msg.type === 'state') {
+      applyState(msg);
     }
   };
 
@@ -134,6 +158,7 @@
   });
 
   rotateSelect.addEventListener('change', () => {
+    if (ignoreEvents) return;
     send({ type: 'control', action: 'rotate', rotation: parseInt(rotateSelect.value, 10) });
   });
 
@@ -142,6 +167,11 @@
     mirrorBtn.textContent = mirrorOn ? 'ON' : 'OFF';
     mirrorBtn.className = mirrorOn ? 'on' : 'off';
     send({ type: 'control', action: 'mirror', enabled: mirrorOn });
+  });
+
+  blurSelect.addEventListener('change', () => {
+    if (ignoreEvents) return;
+    send({ type: 'control', action: 'blur', amount: parseInt(blurSelect.value, 10) });
   });
 </script>
 </body>

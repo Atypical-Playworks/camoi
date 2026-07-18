@@ -61,9 +61,12 @@
   let currentDeviceId = '';
   let currentRotation = 0;
   let isMirrored = false;
+  let blurAmount = 0;
   let animFrameId = null;
   let allCameras = [];
   let canvasCtx = null;
+  let videoWidth = 1920;
+  let videoHeight = 1080;
 
   const DEFAULT_QUALITY = '1920x1080@30';
 
@@ -100,6 +103,16 @@
     }));
   }
 
+  function sendState() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'state',
+      rotation: currentRotation,
+      mirror: isMirrored,
+      blur: blurAmount,
+    }));
+  }
+
   async function getStream(deviceId, quality) {
     if (localStream) localStream.getTracks().forEach((t) => t.stop());
     const q = parseQuality(quality || DEFAULT_QUALITY);
@@ -115,6 +128,10 @@
     });
     localVideo.srcObject = localStream;
     updatePreviewTransform();
+    const track = localStream.getVideoTracks()[0];
+    const s = track.getSettings();
+    videoWidth = s.width || 1920;
+    videoHeight = s.height || 1080;
     await enumerateCameras();
     setupCanvas();
     return localStream;
@@ -123,21 +140,12 @@
   function setupCanvas() {
     if (!canvasCtx) canvasCtx = rotateCanvas.getContext('2d');
 
-    const videoTrack = localStream.getVideoTracks()[0];
-    const settings = videoTrack.getSettings();
-    const srcW = settings.width || 1920;
-    const srcH = settings.height || 1080;
-
-    const isSideways = currentRotation === 90 || currentRotation === 270;
-    rotateCanvas.width = isSideways ? srcH : srcW;
-    rotateCanvas.height = isSideways ? srcW : srcH;
-
     if (animFrameId) cancelAnimationFrame(animFrameId);
 
     function drawFrame() {
       const isSideways = currentRotation === 90 || currentRotation === 270;
-      const canvasW = isSideways ? srcH : srcW;
-      const canvasH = isSideways ? srcW : srcH;
+      const canvasW = isSideways ? videoHeight : videoWidth;
+      const canvasH = isSideways ? videoWidth : videoHeight;
 
       if (rotateCanvas.width !== canvasW || rotateCanvas.height !== canvasH) {
         rotateCanvas.width = canvasW;
@@ -149,7 +157,10 @@
       canvasCtx.translate(canvasW / 2, canvasH / 2);
       canvasCtx.rotate((currentRotation * Math.PI) / 180);
       if (isMirrored) canvasCtx.scale(-1, 1);
-      canvasCtx.drawImage(localVideo, -srcW / 2, -srcH / 2, srcW, srcH);
+      if (blurAmount > 0) {
+        canvasCtx.filter = `blur(${blurAmount}px)`;
+      }
+      canvasCtx.drawImage(localVideo, -videoWidth / 2, -videoHeight / 2, videoWidth, videoHeight);
       canvasCtx.restore();
       animFrameId = requestAnimationFrame(drawFrame);
     }
@@ -163,7 +174,7 @@
   }
 
   function getActiveStream() {
-    const needsProcessing = currentRotation !== 0 || isMirrored;
+    const needsProcessing = currentRotation !== 0 || isMirrored || blurAmount > 0;
     return needsProcessing ? canvasStream : localStream;
   }
 
@@ -193,6 +204,8 @@
         await handleControl(msg);
       } else if (msg.type === 'request-cameras') {
         sendCameraList();
+      } else if (msg.type === 'request-state') {
+        sendState();
       }
     };
   }
@@ -214,6 +227,9 @@
       case 'mirror':
         isMirrored = msg.enabled;
         updatePreviewTransform();
+        break;
+      case 'blur':
+        blurAmount = msg.amount || 0;
         break;
     }
   }
